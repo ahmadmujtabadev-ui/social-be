@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Canvastry Wholesale • API</title>
+  <meta name="description" content="Canvastry Wholesale backend API" />
+
+  <!-- Tailwind via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-gray-50 text-gray-800 antialiased">
+  <div class="mx-auto max-w-4xl px-6 py-14">
+    <header class="flex items-center gap-3">
+      <div class="h-12 w-12 rounded-2xl bg-gray-900 text-white grid place-items-center font-semibold">CW</div>
+      <div>
+        <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Canvastry Wholesale — Backend</h1>
+        <p class="text-sm text-gray-500">A clean API surface with versioned base URL</p>
+      </div>
+    </header>
+
+    <main class="mt-10 grid gap-6">
+      <!-- Status Card -->
+      <section class="rounded-2xl border bg-white p-6 shadow-sm">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-medium">Server Status</h2>
+          <span id="server-status" class="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-700">
+            <span class="h-2 w-2 rounded-full bg-gray-400"></span>
+            Loading...
+          </span>
+        </div>
+        <div class="mt-4 grid gap-2 text-sm text-gray-600">
+          <p><span class="font-medium text-gray-900">Environment:</span> <span id="env"></span></p>
+          <p><span class="font-medium text-gray-900">Timestamp:</span> <span id="timestamp"></span></p>
+          <p><span class="font-medium text-gray-900">Database:</span> <span id="db"></span></p>
+        </div>
+      </section>
+     
+      <!-- Footer -->
+      <footer class="text-center text-xs text-gray-500 mt-4">
+        © <span id="year"></span> Canvastry Wholesale. All rights reserved.
+      </footer>
+    </main>
+  </div>
+
+  <script>
+    async function loadHealth() {
+      try {
+        const res = await fetch("/health");
+        const data = await res.json();
+
+        document.getElementById("env").textContent = data.environment;
+        document.getElementById("timestamp").textContent = data.timestamp;
+        document.getElementById("db").textContent = data.db.status;
+
+        const statusEl = document.getElementById("server-status");
+        if (data.status === "ok") {
+          statusEl.className = "inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-sm text-emerald-700";
+          statusEl.innerHTML = '<span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span> Running';
+        } else {
+          statusEl.className = "inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-sm text-red-700";
+          statusEl.innerHTML = '<span class="h-2 w-2 rounded-full bg-red-500 animate-pulse"></span> Error';
+        }
+
+        document.getElementById("year").textContent = new Date().getFullYear();
+      } catch (err) {
+        console.error("Health check failed", err);
+      }
+    }
+
+    loadHealth();
+  </script>
+</body>
+</html>
