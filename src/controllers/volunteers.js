@@ -3,7 +3,7 @@ import { VolunteerFlat } from "../models/volunteer.js";
 export async function createVolunteer(req, res) {
   try {
     const b = req.body;
-    
+
     // Validate required fields
     if (!b.fullName || !b.email || !b.phone || !b.slot || !b.emName || !b.emRelation || !b.emPhone) {
       return res.status(400).json({ 

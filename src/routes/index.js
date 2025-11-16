@@ -8,7 +8,6 @@ import vendorRoutes from './vendor.js';
 
 
 const router = express.Router();
-
 router.use('/api/v1/booth', boothRoutes);
 router.use('/api/v1/participants', participantRoutes);
 router.use('/api/v1/sponsor', sponserRoutes);

@@ -23,13 +23,6 @@ const volunteerSchema = new mongoose.Schema({
     required: [true, 'Email is required'],
     unique: true,
     lowercase: true,
-    trim: true,
-    validate: {
-      validator: function(v) {
-        return /^\S+@\S+\.\S+$/.test(v);
-      },
-      message: 'Please enter a valid email'
-    }
   },
   phone: {
     type: String,

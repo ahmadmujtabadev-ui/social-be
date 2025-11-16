@@ -5,7 +5,7 @@ const sponsorSchema = new mongoose.Schema(
   {
     businessName: { type: String, required: true },
     ownerName: { type: String, required: true },
-    email: { type: String, required: true },
+    email: { type: String},
     phone: { type: String, required: true },
     oneLiner: String,
     category: {

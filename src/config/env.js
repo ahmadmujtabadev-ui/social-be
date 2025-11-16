@@ -12,8 +12,7 @@ export const env = {
   // MONGO
   MONGO_URI:
     process.env.MONGO_URI ||
-    process.env.CONNECTION_URL || // your .env
-    'mongodb://127.0.0.1:27017/exchangehub',
+    process.env.CONNECTION_URL ,
 
   // JWT (support both naming styles)
   JWT_SECRET: process.env.JWT_SECRET || process.env.JWT_ACCESS_SECRET || 'dev_jwt_secret_change_me',
