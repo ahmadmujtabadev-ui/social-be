@@ -72,6 +72,7 @@ export async function createVendor(req, res) {
     if (!b.phone) missing.push('phone');
     if (b.isOakville === undefined || b.isOakville === '') missing.push('isOakville');
     if (!b.category) missing.push('category');
+    if (!b.boothNumber) missing.push('boothNumber');
 
     // Category-specific validation
     if (b.category === 'Food Vendor' && !b.foodItems) missing.push('foodItems');
@@ -85,6 +86,20 @@ export async function createVendor(req, res) {
         error: 'Missing required fields', 
         missing,
         received: Object.keys(b)
+      });
+    }
+
+    // 2) Check if booth is already selected
+    const existingVendor = await Vendor.findOne({ 
+      boothNumber: b.boothNumber.id,
+      status: { $in: ['submitted', 'approved', 'confirmed'] } // Check active bookings
+    });
+
+    if (existingVendor) {
+      return res.status(400).json({ 
+        error: 'Booth already selected',
+        message: `Booth ${b.boothNumber.id} is already reserved by another vendor`,
+        boothNumber: b.boothNumber.id
       });
     }
 
@@ -159,7 +174,7 @@ export async function createVendor(req, res) {
       },
       category: b.category,
       businessLogoPath: logoPath,
-      boothNumber: b.boothNumber.id, // Store selected booth numbers
+      boothNumber: b.boothNumber.id, // Store selected booth number
       pricing: { 
         base: baseAmount, 
         promoCode, 
@@ -220,7 +235,7 @@ export async function createVendor(req, res) {
         id: vendor._id,
         vendorName: vendor.vendorName,
         category: vendor.category,
-        boothNumbers: vendor.boothNumbers,
+        boothNumber: vendor.boothNumber,
         status: vendor.status,
         pricing: vendor.pricing
       }
