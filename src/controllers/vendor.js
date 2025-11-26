@@ -62,9 +62,9 @@ function groupFiles(files) {
 export async function createVendor(req, res) {
   try {
     const b = req.body || {};
+    console.log("booth number", b.boothNumber)
     const filesGrouped = groupFiles(req.files);
 
-    // 1) Validate required fields
     const missing = [];
     if (!b.personName) missing.push('personName');
     if (!b.vendorName) missing.push('vendorName');
@@ -73,8 +73,6 @@ export async function createVendor(req, res) {
     if (b.isOakville === undefined || b.isOakville === '') missing.push('isOakville');
     if (!b.category) missing.push('category');
     if (!b.boothNumber) missing.push('boothNumber');
-
-    // Category-specific validation
     if (b.category === 'Food Vendor' && !b.foodItems) missing.push('foodItems');
     if (b.category === 'Clothing Vendor' && !b.clothingType) missing.push('clothingType');
     if (b.category === 'Jewelry Vendor' && !b.jewelryType) missing.push('jewelryType');
@@ -82,56 +80,73 @@ export async function createVendor(req, res) {
 
     if (missing.length) {
       console.log('Missing fields:', missing);
-      return res.status(400).json({ 
-        error: 'Missing required fields', 
+      return res.status(400).json({
+        error: 'Missing required fields',
         missing,
         received: Object.keys(b)
       });
     }
 
-    // 2) Check if booth is already selected
-    const existingVendor = await Vendor.findOne({ 
-      boothNumber: b.boothNumber.id,
-      status: { $in: ['submitted', 'approved', 'confirmed'] } // Check active bookings
-    });
-
-    if (existingVendor) {
-      return res.status(400).json({ 
-        error: 'Booth already selected',
-        message: `Booth ${b.boothNumber.id} is already reserved by another vendor`,
-        boothNumber: b.boothNumber.id
-      });
+    const boothNumber = Number(b.boothNumber);
+    if (Number.isNaN(boothNumber)) {
+      return res.status(400).json({ error: "Invalid boothNumber" });
     }
 
-    // 3) Handle promo code validation
+    console.log('Looking for booth:', { id: boothNumber, category: b.category });
+
+    const booth = await Booth.findOne({
+      id: boothNumber,
+      category: b.category
+    });
+
+    console.log('Found booth:', booth);
+
+    if (!booth) {
+      return res.status(400).json({ error: "Booth not found or category mismatch" });
+    }
+
+    if (booth.status === "booked") {
+      return res.status(409).json({ error: "Booth already booked" });
+    }
+
+    const updatedBooth = await Booth.findOneAndUpdate(
+      { id: boothNumber, category: b.category, status: { $ne: 'booked' } },
+      { $set: { status: "booked" } },
+      { new: true }
+    );
+
+    if (!updatedBooth) {
+      return res.status(409).json({ error: "Booth could not be booked" });
+    }
+
+    console.log('Booth updated:', updatedBooth);
+
+
     let promoCode, promoDiscount, promoDiscountType;
     const incomingPromo = (b.promoCode || '').toString().trim();
-    console.log("incomingPromo 94", incomingPromo)
     if (incomingPromo) {
-      const promo = await Promo.findOne({ 
-        code: incomingPromo.toUpperCase(), 
-        active: true 
+      const promo = await Promo.findOne({
+        code: incomingPromo.toUpperCase(),
+        active: true
       });
-      
+
       if (promo) {
         const now = new Date();
-        
-        // Check start date
+
         if (promo.startsAt && now < new Date(promo.startsAt)) {
-          return res.status(400).json({ 
+          return res.status(400).json({
             error: "Promo code not yet active",
             startsAt: promo.startsAt
           });
         }
-        
-        // Check end date
+
         if (promo.endsAt && now > new Date(promo.endsAt)) {
-          return res.status(400).json({ 
+          return res.status(400).json({
             error: "Promo code has expired",
             endedAt: promo.endsAt
           });
         }
-        
+
         promoCode = promo.code;
         promoDiscount = promo.discount;
         promoDiscountType = promo.discountType || 'percent';
@@ -140,26 +155,23 @@ export async function createVendor(req, res) {
       }
     }
 
-    // 4) Handle file uploads
     const logoPath = filesGrouped.businessLogo?.[0]?.path;
     const foodPhotoPaths = (filesGrouped.foodPhotos || []).map(f => f.path);
     const clothingPhotoPaths = (filesGrouped.clothingPhotos || []).map(f => f.path);
     const jewelryPhotoPaths = (filesGrouped.jewelryPhotos || []).map(f => f.path);
     const craftPhotoPaths = (filesGrouped.craftPhotos || []).map(f => f.path);
 
-    // 5) Calculate pricing
     const baseAmount = numOnly(b.amountToPay) || 0;
-    
+
     let finalAmount = baseAmount;
     if (promoDiscount) {
       if (promoDiscountType === 'flat') {
         finalAmount = Math.max(0, baseAmount - promoDiscount);
-      } else { // percent
+      } else {
         finalAmount = Math.max(0, baseAmount - (baseAmount * promoDiscount / 100));
       }
     }
 
-    // 6) Build vendor document
     const vendorDoc = {
       vendorName: b.vendorName,
       contact: {
@@ -174,20 +186,19 @@ export async function createVendor(req, res) {
       },
       category: b.category,
       businessLogoPath: logoPath,
-      boothNumber: b.boothNumber.id, // Store selected booth number
-      pricing: { 
-        base: baseAmount, 
-        promoCode, 
+      boothNumber: b.boothNumber.id,
+      pricing: {
+        base: baseAmount,
+        promoCode,
         promoDiscount,
         promoDiscountType,
-        final: finalAmount 
+        final: finalAmount
       },
       notes: b.notes,
       termsAcceptedAt: (String(b.terms).toLowerCase() === 'true' || b.terms === true) ? new Date() : undefined,
       status: 'submitted'
     };
 
-    // 7) Add category-specific data
     if (b.category === 'Food Vendor') {
       vendorDoc.food = {
         items: b.foodItems,
@@ -222,12 +233,10 @@ export async function createVendor(req, res) {
 
     console.log('Vendor document to create:', vendorDoc);
 
-    // 8) Create vendor
     const vendor = await Vendor.create(vendorDoc);
 
     console.log('Vendor created:', vendor._id);
 
-    // 9) Return success
     return res.status(201).json({
       success: true,
       message: 'Vendor application submitted successfully',
@@ -243,10 +252,10 @@ export async function createVendor(req, res) {
 
   } catch (error) {
     console.error('Create vendor failed:', error);
-    
-    return res.status(500).json({ 
+
+    return res.status(500).json({
       error: 'Failed to create vendor',
-      message: error.message 
+      message: error.message
     });
   }
 }
