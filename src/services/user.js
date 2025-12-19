@@ -1,8 +1,8 @@
 // src/services/user.js
-import User from '../models/user.js';
 import { signTokens, verifyRefresh } from '../utils/jwt.js';
 import extractClientInfo from '../utils/auth.js';
 import AppError from '../utils/appError.js';
+import  User  from '../models/user.js';
 // import sendResetEmail from '../utils/send-reset-email.js'; // optional
 
 export const toPublicUser = (u) => ({
@@ -21,20 +21,16 @@ export const toPublicUser = (u) => ({
   lastLoginAt: u.lastLoginAt,
 });
 
-export async function registerService({ email, password, businessName, country, phone, role }) {
+export async function registerService({ email, password}) {
   const existing = await User.findOne({ email });
   if (existing) throw new AppError('Email already registered', 409);
 
   const user = await User.create({
     email,
     password,
-    businessName,
-    country,
-    phone,
-    role,
-    isActive: true,
-    emailVerified: true, // no OTP → verified immediately
+
   });
+  console.log("user", user)
 
   const tokens = signTokens(user);
   return { user: toPublicUser(user), ...tokens, message: 'Signup successful.' };
@@ -45,12 +41,22 @@ export async function registerService({ email, password, businessName, country, 
  */
 export async function loginService(req, { email, password }) {
   const { ip, userAgent } = extractClientInfo(req);
-  const user = await User.findOne({ email }).select('+password');
-  if (!user || !user.isActive) throw new AppError('Invalid credentials', 401);
 
-  const ok = await user.comparePassword(password);
-  
-  if (!ok) {
+  const user = await User.findOne({ email }).select('+password');
+  if (!user) throw new AppError('Invalid credentials', 401);
+
+  if (!user.password) {
+    throw new AppError(
+      'User password is missing in DB or not selected. Check schema select:false and register hashing.',
+      500
+    );
+  }
+  console.log("user", user)
+
+  const isValid = await user.comparePassword(password);
+  console.log("isValid", isValid)
+
+  if (!isValid) {
     await User.updateOne(
       { _id: user._id },
       { $push: { loginHistory: { ip, userAgent, status: 'failure' } } }
@@ -65,6 +71,7 @@ export async function loginService(req, { email, password }) {
   const tokens = signTokens(user);
   return { user: toPublicUser(user), ...tokens };
 }
+
 
 /**
  * CHANGE PASSWORD (authenticated)

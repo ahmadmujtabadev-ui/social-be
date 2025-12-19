@@ -6,12 +6,12 @@ import { createPromo } from '../controllers/promo.js';
 
 const router = express.Router();
 router.get('/stats', authRequired, getStats);
-router.get('/', authRequired, listVendors);
+router.get('/', listVendors);
 router.get('/:id', authRequired, getVendor);
 router.post('/', upload, createVendor);
 router.post("/create", createPromo)
 
-router.patch('/:id', authRequired, updateVendor);
-router.delete('/:id', authRequired, removeVendor);
+router.put('/update/:id', updateVendor);
+router.delete('/:id', removeVendor);
 export default router;
 
