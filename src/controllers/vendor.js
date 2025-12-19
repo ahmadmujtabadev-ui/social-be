@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Booth } from "../models/booth.js";
 import { Promo } from "../models/promoCode.js";
 import { Vendor } from "../models/vendor.js";
+import { sendVendorSubmissionEmails } from "../utils/sendEmailNotification.js";
 
 // ── src/controllers/vendors.js ──────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ const numOnly = (v) => {
   return Number.isFinite(n) ? n : undefined;
 };
 
-// // normalize files that may arrive as fieldname, fieldname[], or fieldname[0]
+// // normalize files that may arrive as fieldname, fieldname[], zzor fieldname[0]
 // function groupFiles(files) {
 //   const map = {};
 //   (files || []).forEach(f => {
@@ -131,14 +132,18 @@ export async function createVendor(req, res) {
     const b = req.body || {};
     const filesGrouped = groupFiles(req.files);
 
+    // Validate required fields
     const missing = [];
     if (!b.personName) missing.push('personName');
     if (!b.vendorName) missing.push('vendorName');
     if (!b.email) missing.push('email');
     if (!b.phone) missing.push('phone');
     if (b.isOakville === undefined || b.isOakville === '') missing.push('isOakville');
+    if (!b.selectedEvent) missing.push('selectedEvent');
     if (!b.category) missing.push('category');
     if (!b.boothNumber) missing.push('boothNumber');
+    
+    // Category-specific validation
     if (b.category === 'Food Vendor' && !b.foodItems) missing.push('foodItems');
     if (b.category === 'Clothing Vendor' && !b.clothingType) missing.push('clothingType');
     if (b.category === 'Jewelry Vendor' && !b.jewelryType) missing.push('jewelryType');
@@ -153,6 +158,7 @@ export async function createVendor(req, res) {
       });
     }
 
+    // Validate and fetch booth
     const boothNumber = Number(b.boothNumber);
     if (Number.isNaN(boothNumber)) {
       await session.abortTransaction();
@@ -208,6 +214,7 @@ export async function createVendor(req, res) {
 
     let promoCode, promoDiscount, promoDiscountType;
     const incomingPromo = (b.promoCode || '').toString().trim();
+    
     if (incomingPromo) {
       const promo = await Promo.findOne({
         code: incomingPromo.toUpperCase(),
@@ -233,12 +240,15 @@ export async function createVendor(req, res) {
         promoCode = promo.code;
         promoDiscount = promo.discount;
         promoDiscountType = promo.discountType || 'percent';
+        
+        console.log('🎟️ Promo code applied:', promoCode, `-${promoDiscount}${promoDiscountType === 'percent' ? '%' : '$'}`);
       } else {
         await session.abortTransaction();
         return res.status(400).json({ error: "Invalid promo code" });
       }
     }
 
+    // Process file uploads
     const logoPath = filesGrouped.businessLogo?.[0]?.path;
     const foodPhotoPaths = (filesGrouped.foodPhotos || []).map(f => f.path);
     const clothingPhotoPaths = (filesGrouped.clothingPhotos || []).map(f => f.path);
@@ -247,6 +257,7 @@ export async function createVendor(req, res) {
 
     const baseAmount = numOnly(b.amountToPay) || 0;
     let finalAmount = baseAmount;
+    
     if (promoDiscount) {
       if (promoDiscountType === 'flat') {
         finalAmount = Math.max(0, baseAmount - promoDiscount);
@@ -275,6 +286,7 @@ export async function createVendor(req, res) {
         facebook: b.facebook || undefined
       },
       category: b.category,
+      selectedEvent: b.selectedEvent,
       businessLogoPath: logoPath,
       boothNumber: booth.id.toString(),
       boothRef: booth._id,
@@ -294,6 +306,7 @@ export async function createVendor(req, res) {
       status: 'held'
     };
 
+    // Add category-specific fields
     if (b.category === 'Food Vendor') {
       vendorDoc.food = {
         items: b.foodItems,
@@ -335,6 +348,61 @@ export async function createVendor(req, res) {
     // Commit transaction
     await session.commitTransaction();
 
+    // Prepare email data
+    const emailData = {
+      vendorId: vendor._id,
+      vendorName: vendor.vendorName,
+      personName: vendor.contact.personName,
+      email: vendor.contact.email,
+      phone: vendor.contact.phone,
+      category: vendor.category,
+      boothNumber: vendor.boothNumber,
+      isOakville: vendor.contact.isOakville,
+      selectedEvent: vendor.selectedEvent,
+      pricing: vendor.pricing,
+      instagram: vendor.socials?.instagram,
+      facebook: vendor.socials?.facebook,
+      notes: vendor.notes,
+      submittedAt: new Date().toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      }),
+    };
+
+    // Add category-specific data for email
+    if (vendor.food) {
+      emailData.foodItems = vendor.food.items;
+      emailData.needPower = vendor.food.needPower;
+      emailData.watts = vendor.food.watts;
+    }
+    if (vendor.clothing) {
+      emailData.clothingType = vendor.clothing.clothingType;
+    }
+    if (vendor.jewelry) {
+      emailData.jewelryType = vendor.jewelry.jewelryType;
+    }
+    if (vendor.craft) {
+      emailData.craftDetails = vendor.craft.details;
+      emailData.needPower = vendor.craft.needPower;
+      emailData.watts = vendor.craft.watts;
+    }
+
+    // Send email notifications (admin + vendor confirmation)
+    console.log('📧 Sending email notifications...');
+    
+    try {
+      await sendVendorSubmissionEmails(emailData);
+      console.log('✅ Email notifications sent successfully');
+    } catch (emailError) {
+      console.error('⚠️ Email notification failed (non-critical):', emailError.message);
+      // Don't fail the request if email fails
+    }
+
+    // Return success response
     return res.status(201).json({
       success: true,
       message: "Thank you for applying! We've sent the next steps to your email. Your booth is reserved for the next 48 hours. Please complete the steps in the email to confirm your booking.",

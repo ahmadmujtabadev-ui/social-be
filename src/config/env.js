@@ -1,7 +1,10 @@
 // src/config/env.js
 import 'dotenv/config';
 import crypto from 'crypto';
-
+const required = (v, key) => {
+  if (!v) throw new Error(`Missing env: ${key}`);
+  return v;
+};
 const pick = (...keys) => keys.find((k) => typeof k === 'string' && k.length) || undefined;
 
 export const env = {
@@ -24,14 +27,13 @@ export const env = {
     process.env.REFRESH_EXPIRES_IN || process.env.JWT_REFRESH_TTL || '30d',
 
   // encryption key for AES-256-GCM
-  MASTER_KEY_HEX: process.env.MASTER_KEY_HEX,
-  // Optional: pass-through of your CC_* vars if used elsewhere
-  CC_BASE_URL: process.env.CC_BASE_URL,
-  CC_CLIENT_ID: process.env.CC_CLIENT_ID,
-  CC_CLIENT_SECRET: process.env.CC_CLIENT_SECRET,
-  CC_ROOT: process.env.CC_ROOT,
-  CC_EDITOR_URL: process.env.CC_EDITOR_URL,
-  CC_TENANT_ID: process.env.CC_TENANT_ID,
+  // ───────── EMAIL CONFIG (for Nodemailer + Gmail) ─────────
+  MAIL_USER: required(process.env.MAIL_USER, "MAIL_USER"),
+  MAIL_PASS: required(process.env.MAIL_PASS, "MAIL_PASS"),
+
+  // Admin notification email(s)
+  MARKETING_ADMIN_EMAIL: process.env.MARKETING_ADMIN_EMAIL,
+  ADMIN_EMAIL: process.env.ADMIN_EMAIL,
 };
 
 const isHex64 = (v) => typeof v === 'string' && /^[0-9a-fA-F]{64}$/.test(v);
