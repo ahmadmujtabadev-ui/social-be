@@ -4,10 +4,12 @@ import boothRoutes from './booth.js';
 import participantRoutes from './participants.js';
 import volunteerRoutes from './voluteers.js';
 import sponserRoutes from './sponsor.js';
-import vendorRoutes from './vendor.js';
-
+import userRoutes from './user.js';
+import vendorRoutes from './vendor.js';     
 
 const router = express.Router();
+router.use('/api/v1/participants', participantRoutes);                                                              
+router.use('/api/v1/user', userRoutes);
 router.use('/api/v1/booth', boothRoutes);
 router.use('/api/v1/participants', participantRoutes);
 router.use('/api/v1/sponsor', sponserRoutes);

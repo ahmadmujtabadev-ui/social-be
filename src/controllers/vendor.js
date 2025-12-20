@@ -1,16 +1,40 @@
+import mongoose from "mongoose";
 import { Booth } from "../models/booth.js";
 import { Promo } from "../models/promoCode.js";
 import { Vendor } from "../models/vendor.js";
 import { sendVendorSubmissionEmails } from "../utils/sendEmailNotification.js";
 
 // ── src/controllers/vendors.js ──────────────────────────────────────────────
+
+import cron from 'node-cron';
+
+export function setupExpiryCleanupJob() {
+  cron.schedule('*/15 * * * *', async () => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      await releaseExpiredHolds(session);
+      await session.commitTransaction();
+      console.log('✅ Expired holds cleaned up');
+    } catch (error) {
+      await session.abortTransaction();
+      console.error('❌ Failed to clean expired holds:', error);
+    } finally {
+      session.endSession();
+    }
+  });
+}
+
+setupExpiryCleanupJob();
+
 const numOnly = (v) => {
   if (v === undefined || v === null || v === '') return undefined;
   const n = Number(String(v).replace(/[^\d.-]/g, ''));
   return Number.isFinite(n) ? n : undefined;
 };
 
-// // normalize files that may arrive as fieldname, fieldname[], or fieldname[0]
+// // normalize files that may arrive as fieldname, fieldname[], zzor fieldname[0]
 // function groupFiles(files) {
 //   const map = {};
 //   (files || []).forEach(f => {
@@ -60,213 +84,52 @@ function groupFiles(files) {
   return {};
 }
 
-// export async function createVendor(req, res) {
-//   try {
-//     const b = req.body || {};
-//     console.log("booth number", b.boothNumber)
-//     const filesGrouped = groupFiles(req.files);
 
-//     const missing = [];
-//     if (!b.personName) missing.push('personName');
-//     if (!b.vendorName) missing.push('vendorName');
-//     if (!b.email) missing.push('email');
-//     if (!b.phone) missing.push('phone');
-//     if (b.isOakville === undefined || b.isOakville === '') missing.push('isOakville');
-//     if (!b.category) missing.push('category');
-//     if (!b.boothNumber) missing.push('boothNumber');
-//     if (b.category === 'Food Vendor' && !b.foodItems) missing.push('foodItems');
-//     if (b.category === 'Clothing Vendor' && !b.clothingType) missing.push('clothingType');
-//     if (b.category === 'Jewelry Vendor' && !b.jewelryType) missing.push('jewelryType');
-//     if (b.category === 'Craft Booth' && !b.craftDetails) missing.push('craftDetails');
+async function releaseExpiredHolds(session) {
+  const now = new Date();
 
-//     if (missing.length) {
-//       console.log('Missing fields:', missing);
-//       return res.status(400).json({
-//         error: 'Missing required fields',
-//         missing,
-//         received: Object.keys(b)
-//       });
-//     }
+  const expiredBooths = await Booth.find({
+    status: 'held',
+    heldUntil: { $lt: now }
+  }).session(session);
 
-//     const boothNumber = Number(b.boothNumber);
-//     if (Number.isNaN(boothNumber)) {
-//       return res.status(400).json({ error: "Invalid boothNumber" });
-//     }
+  if (expiredBooths.length > 0) {
+    // Release booths
+    await Booth.updateMany(
+      {
+        status: 'held',
+        heldUntil: { $lt: now }
+      },
+      {
+        $set: { status: 'available' },
+        $unset: { heldBy: '', heldUntil: '' }
+      },
+      { session }
+    );
 
-//     console.log('Looking for booth:', { id: boothNumber, category: b.category });
-
-//     const booth = await Booth.findOne({
-//       id: boothNumber,
-//       category: b.category
-//     });
-
-//     console.log('Found booth:', booth);
-
-//     if (!booth) {
-//       return res.status(400).json({ error: "Booth not found or category mismatch" });
-//     }
-
-//     if (booth.status === "booked") {
-//       return res.status(409).json({ error: "Booth already booked" });
-//     }
-
-//     const updatedBooth = await Booth.findOneAndUpdate(
-//       { id: boothNumber, category: b.category, status: { $ne: 'booked' } },
-//       { $set: { status: "booked" } },
-//       { new: true }
-//     );
-
-//     if (!updatedBooth) {
-//       return res.status(409).json({ error: "Booth could not be booked" });
-//     }
-
-//     console.log('Booth updated:', updatedBooth);
-
-
-//     let promoCode, promoDiscount, promoDiscountType;
-//     const incomingPromo = (b.promoCode || '').toString().trim();
-//     if (incomingPromo) {
-//       const promo = await Promo.findOne({
-//         code: incomingPromo.toUpperCase(),
-//         active: true
-//       });
-
-//       if (promo) {
-//         const now = new Date();
-
-//         if (promo.startsAt && now < new Date(promo.startsAt)) {
-//           return res.status(400).json({
-//             error: "Promo code not yet active",
-//             startsAt: promo.startsAt
-//           });
-//         }
-
-//         if (promo.endsAt && now > new Date(promo.endsAt)) {
-//           return res.status(400).json({
-//             error: "Promo code has expired",
-//             endedAt: promo.endsAt
-//           });
-//         }
-
-//         promoCode = promo.code;
-//         promoDiscount = promo.discount;
-//         promoDiscountType = promo.discountType || 'percent';
-//       } else {
-//         return res.status(400).json({ error: "Invalid promo code" });
-//       }
-//     }
-
-//     const logoPath = filesGrouped.businessLogo?.[0]?.path;
-//     const foodPhotoPaths = (filesGrouped.foodPhotos || []).map(f => f.path);
-//     const clothingPhotoPaths = (filesGrouped.clothingPhotos || []).map(f => f.path);
-//     const jewelryPhotoPaths = (filesGrouped.jewelryPhotos || []).map(f => f.path);
-//     const craftPhotoPaths = (filesGrouped.craftPhotos || []).map(f => f.path);
-
-//     const baseAmount = numOnly(b.amountToPay) || 0;
-
-//     let finalAmount = baseAmount;
-//     if (promoDiscount) {
-//       if (promoDiscountType === 'flat') {
-//         finalAmount = Math.max(0, baseAmount - promoDiscount);
-//       } else {
-//         finalAmount = Math.max(0, baseAmount - (baseAmount * promoDiscount / 100));
-//       }
-//     }
-
-//     const vendorDoc = {
-//       vendorName: b.vendorName,
-//       contact: {
-//         personName: b.personName,
-//         email: b.email,
-//         phone: b.phone,
-//         isOakville: String(b.isOakville).toLowerCase() === 'yes' || b.isOakville === true
-//       },
-//       socials: {
-//         instagram: b.instagram || undefined,
-//         facebook: b.facebook || undefined
-//       },
-//       category: b.category,
-//       businessLogoPath: logoPath,
-//       boothNumber: b.boothNumber.id,
-//       pricing: {
-//         base: baseAmount,
-//         promoCode,
-//         promoDiscount,
-//         promoDiscountType,
-//         final: finalAmount
-//       },
-//       notes: b.notes,
-//       termsAcceptedAt: (String(b.terms).toLowerCase() === 'true' || b.terms === true) ? new Date() : undefined,
-//       status: 'submitted'
-//     };
-
-//     if (b.category === 'Food Vendor') {
-//       vendorDoc.food = {
-//         items: b.foodItems,
-//         photoPaths: foodPhotoPaths,
-//         needPower: String(b.needPowerFood).toLowerCase() === 'yes' || b.needPowerFood === true,
-//         watts: numOnly(b.foodWatts)
-//       };
-//     }
-
-//     if (b.category === 'Clothing Vendor') {
-//       vendorDoc.clothing = {
-//         clothingType: b.clothingType,
-//         photoPaths: clothingPhotoPaths
-//       };
-//     }
-
-//     if (b.category === 'Jewelry Vendor') {
-//       vendorDoc.jewelry = {
-//         jewelryType: b.jewelryType,
-//         photoPaths: jewelryPhotoPaths
-//       };
-//     }
-
-//     if (b.category === 'Craft Booth') {
-//       vendorDoc.craft = {
-//         details: b.craftDetails,
-//         photoPaths: craftPhotoPaths,
-//         needPower: String(b.needPowerCraft).toLowerCase() === 'yes' || b.needPowerCraft === true,
-//         watts: numOnly(b.craftWatts)
-//       };
-//     }
-
-//     console.log('Vendor document to create:', vendorDoc);
-
-//     const vendor = await Vendor.create(vendorDoc);
-
-//     console.log('Vendor created:', vendor._id);
-
-//     return res.status(201).json({
-//       success: true,
-//       message: 'Vendor application submitted successfully',
-//       vendor: {
-//         id: vendor._id,
-//         vendorName: vendor.vendorName,
-//         category: vendor.category,
-//         boothNumber: vendor.boothNumber,
-//         status: vendor.status,
-//         pricing: vendor.pricing
-//       }
-//     });
-
-//   } catch (error) {
-//     console.error('Create vendor failed:', error);
-
-//     return res.status(500).json({
-//       error: 'Failed to create vendor',
-//       message: error.message
-//     });
-//   }
-// }
+    // Mark vendors as expired
+    const expiredVendorIds = expiredBooths.map(b => b.heldBy).filter(Boolean);
+    if (expiredVendorIds.length > 0) {
+      await Vendor.updateMany(
+        {
+          _id: { $in: expiredVendorIds },
+          status: 'held'
+        },
+        {
+          $set: { status: 'expired' }
+        },
+        { session }
+      );
+    }
+  }
+}
 
 export async function createVendor(req, res) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const b = req.body || {};
-    console.log('📝 Vendor submission received');
-    console.log('Booth number:', b.boothNumber);
-    
     const filesGrouped = groupFiles(req.files);
 
     // Validate required fields
@@ -287,7 +150,7 @@ export async function createVendor(req, res) {
     if (b.category === 'Craft Booth' && !b.craftDetails) missing.push('craftDetails');
 
     if (missing.length) {
-      console.log('❌ Missing required fields:', missing);
+      await session.abortTransaction();
       return res.status(400).json({
         error: 'Missing required fields',
         missing,
@@ -298,54 +161,57 @@ export async function createVendor(req, res) {
     // Validate and fetch booth
     const boothNumber = Number(b.boothNumber);
     if (Number.isNaN(boothNumber)) {
+      await session.abortTransaction();
       return res.status(400).json({ error: "Invalid boothNumber" });
     }
 
-    console.log('🔍 Looking for booth:', { id: boothNumber, category: b.category });
+    await releaseExpiredHolds(session);
 
-    const booth = await Booth.findOne({
-      id: boothNumber,
-      category: b.category
-    });
+    // const booth = await Booth.findOneAndUpdate(
+    //   {
+    //     id: boothNumber,
+    //     category: b.category,
+    //     status: 'available' // Only book if truly available
+    //   },
+    //   {
+    //     $set: {
+    //       status: 'held',
+    //       heldUntil: new Date(Date.now() + 48 * 60 * 60 * 1000) // 48 hours from now
+    //     }
+    //   },
+    //   {
+    //     new: true,
+    //     session // Use transaction
+    //   }
+    // );
+    const HOLD_MS = 48 * 60 * 60 * 1000 // 5000 ms
 
-    console.log('Found booth:', booth ? `✓ Booth #${booth.id}` : '✗ Not found');
-
-    if (!booth) {
-      return res.status(400).json({ 
-        error: "Booth not found or category mismatch",
-        details: `No booth #${boothNumber} found for category "${b.category}"` 
-      });
-    }
-
-    if (booth.status === "booked") {
-      return res.status(409).json({ 
-        error: "Booth already booked",
-        details: `Booth #${boothNumber} is currently unavailable. Please select a different booth.`
-      });
-    }
-
-    // Atomically update booth status
-    const updatedBooth = await Booth.findOneAndUpdate(
-      { id: boothNumber, category: b.category, status: { $ne: 'booked' } },
-      { 
-        $set: { 
-          status: "booked",
-          bookedAt: new Date()
-        } 
+    // In createVendor -> Booth.findOneAndUpdate
+    const booth = await Booth.findOneAndUpdate(
+      {
+        id: boothNumber,
+        category: b.category,
+        status: 'available' // Only book if truly available
       },
-      { new: true }
+      {
+        $set: {
+          status: 'held',
+          heldUntil: new Date(Date.now() + HOLD_MS) // 5 seconds from now
+        }
+      },
+      {
+        new: true,
+        session
+      }
     );
 
-    if (!updatedBooth) {
-      return res.status(409).json({ 
-        error: "Booth could not be booked",
-        details: "This booth may have been booked by another vendor. Please try a different booth."
+    if (!booth) {
+      await session.abortTransaction();
+      return res.status(409).json({
+        error: "Booth not available. It may be booked or held by another vendor."
       });
     }
 
-    console.log('✅ Booth updated:', `#${updatedBooth.id} - Status: ${updatedBooth.status}`);
-
-    // Handle promo code validation
     let promoCode, promoDiscount, promoDiscountType;
     const incomingPromo = (b.promoCode || '').toString().trim();
     
@@ -353,32 +219,31 @@ export async function createVendor(req, res) {
       const promo = await Promo.findOne({
         code: incomingPromo.toUpperCase(),
         active: true
-      });
+      }).session(session);
 
       if (promo) {
         const now = new Date();
-
-        // Check if promo is active
         if (promo.startsAt && now < new Date(promo.startsAt)) {
+          await session.abortTransaction();
           return res.status(400).json({
             error: "Promo code not yet active",
             startsAt: promo.startsAt
           });
         }
-
         if (promo.endsAt && now > new Date(promo.endsAt)) {
+          await session.abortTransaction();
           return res.status(400).json({
             error: "Promo code has expired",
             endedAt: promo.endsAt
           });
         }
-
         promoCode = promo.code;
         promoDiscount = promo.discount;
         promoDiscountType = promo.discountType || 'percent';
         
         console.log('🎟️ Promo code applied:', promoCode, `-${promoDiscount}${promoDiscountType === 'percent' ? '%' : '$'}`);
       } else {
+        await session.abortTransaction();
         return res.status(400).json({ error: "Invalid promo code" });
       }
     }
@@ -390,15 +255,6 @@ export async function createVendor(req, res) {
     const jewelryPhotoPaths = (filesGrouped.jewelryPhotos || []).map(f => f.path);
     const craftPhotoPaths = (filesGrouped.craftPhotos || []).map(f => f.path);
 
-    console.log('📸 Files uploaded:', {
-      logo: logoPath ? '✓' : '✗',
-      foodPhotos: foodPhotoPaths.length,
-      clothingPhotos: clothingPhotoPaths.length,
-      jewelryPhotos: jewelryPhotoPaths.length,
-      craftPhotos: craftPhotoPaths.length,
-    });
-
-    // Calculate pricing
     const baseAmount = numOnly(b.amountToPay) || 0;
     let finalAmount = baseAmount;
     
@@ -410,13 +266,13 @@ export async function createVendor(req, res) {
       }
     }
 
-    console.log('💰 Pricing:', {
-      base: `$${baseAmount.toFixed(2)}`,
-      discount: promoDiscount ? `-$${(baseAmount - finalAmount).toFixed(2)}` : 'None',
-      final: `$${finalAmount.toFixed(2)}`
-    });
+    const now = new Date();
+    const heldUntil = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
-    // Build vendor document
+    // And for vendor bookingTimeline
+    // const now = new Date();
+    // const heldUntil = new Date(now.getTime() + HOLD_MS);
+
     const vendorDoc = {
       vendorName: b.vendorName,
       contact: {
@@ -432,7 +288,8 @@ export async function createVendor(req, res) {
       category: b.category,
       selectedEvent: b.selectedEvent,
       businessLogoPath: logoPath,
-      boothNumber: boothNumber,
+      boothNumber: booth.id.toString(),
+      boothRef: booth._id,
       pricing: {
         base: baseAmount,
         promoCode,
@@ -440,9 +297,13 @@ export async function createVendor(req, res) {
         promoDiscountType,
         final: finalAmount
       },
-      notes: b.notes || '',
-      termsAcceptedAt: (String(b.terms).toLowerCase() === 'true' || b.terms === true) ? new Date() : undefined,
-      status: 'submitted'
+      bookingTimeline: {
+        submittedAt: now,
+        heldUntil: heldUntil
+      },
+      notes: b.notes,
+      termsAcceptedAt: (String(b.terms).toLowerCase() === 'true' || b.terms === true) ? now : undefined,
+      status: 'held'
     };
 
     // Add category-specific fields
@@ -454,21 +315,18 @@ export async function createVendor(req, res) {
         watts: numOnly(b.foodWatts)
       };
     }
-
     if (b.category === 'Clothing Vendor') {
       vendorDoc.clothing = {
         clothingType: b.clothingType,
         photoPaths: clothingPhotoPaths
       };
     }
-
     if (b.category === 'Jewelry Vendor') {
       vendorDoc.jewelry = {
         jewelryType: b.jewelryType,
         photoPaths: jewelryPhotoPaths
       };
     }
-
     if (b.category === 'Craft Booth') {
       vendorDoc.craft = {
         details: b.craftDetails,
@@ -478,12 +336,17 @@ export async function createVendor(req, res) {
       };
     }
 
-    console.log('📄 Creating vendor document...');
+    const [vendor] = await Vendor.create([vendorDoc], { session });
 
-    // Create vendor in database
-    const vendor = await Vendor.create(vendorDoc);
+    // Update booth to reference the vendor
+    await Booth.findByIdAndUpdate(
+      booth._id,
+      { $set: { heldBy: vendor._id } },
+      { session }
+    );
 
-    console.log('✅ Vendor created successfully:', vendor._id);
+    // Commit transaction
+    await session.commitTransaction();
 
     // Prepare email data
     const emailData = {
@@ -542,37 +405,27 @@ export async function createVendor(req, res) {
     // Return success response
     return res.status(201).json({
       success: true,
-      message: 'Vendor application submitted successfully',
+      message: "Thank you for applying! We've sent the next steps to your email. Your booth is reserved for the next 48 hours. Please complete the steps in the email to confirm your booking.",
       vendor: {
         id: vendor._id,
         vendorName: vendor.vendorName,
         category: vendor.category,
         boothNumber: vendor.boothNumber,
         status: vendor.status,
+        heldUntil: heldUntil.toISOString(),
         pricing: vendor.pricing
       }
     });
 
   } catch (error) {
-    console.error('❌ Create vendor failed:', error);
-
-    // Rollback booth status if vendor creation failed
-    if (req.body?.boothNumber) {
-      try {
-        await Booth.findOneAndUpdate(
-          { id: Number(req.body.boothNumber) },
-          { $set: { status: "available" } }
-        );
-        console.log('♻️ Booth status rolled back to available');
-      } catch (rollbackError) {
-        console.error('⚠️ Failed to rollback booth status:', rollbackError);
-      }
-    }
-
+    await session.abortTransaction();
+    console.error('Create vendor failed:', error);
     return res.status(500).json({
       error: 'Failed to create vendor',
       message: error.message
     });
+  } finally {
+    session.endSession();
   }
 }
 
