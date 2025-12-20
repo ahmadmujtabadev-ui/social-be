@@ -2,7 +2,7 @@
 import { env } from "../config/env.js";
 import { sendEmail } from "./sendEmail.js";
 
-const ADMIN_EMAIL = "ahmadmujtabadev@gmail.com";
+const ADMIN_EMAIL = "mueezamjad.617@gmail.com";
 
 /**
  * Theme tokens (BLACK theme)
