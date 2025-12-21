@@ -1,4 +1,15 @@
-import { VolunteerFlat } from "../models/volunteer.js";
+// ── src/controllers/volunteers.js ─────────────────────────────────────────
+import { VolunteerFlat } from '../models/volunteer.js';
+
+export async function listVolunteers(_req, res) {
+  try {
+    const volunteers = await VolunteerFlat.find().sort({ createdAt: -1 });
+    res.json(volunteers);
+  } catch (e) {
+    console.error('Error listing volunteers:', e);
+    res.status(500).json({ error: 'Failed to fetch volunteers' });
+  }
+}
 
 export async function createVolunteer(req, res) {
   try {
@@ -20,22 +31,12 @@ export async function createVolunteer(req, res) {
       });
     }
 
-    // Map slot values to display text if needed
-    const slotMapping = {
-      'morning': 'Morning Shift (8am - 12pm)',
-      'afternoon': 'Afternoon Shift (12pm - 4pm)',
-      'evening': 'Evening Shift (4pm - 8pm)',
-      'fullday': 'Full Day (8am - 8pm)'
-    };
-
     // Create volunteer with emergency contact as nested object
     const created = await VolunteerFlat.create({
       fullName: b.fullName,
       email: b.email,
       phone: b.phone,
-      slot: b.slot, // Use the simple value: 'morning', 'afternoon', etc.
-      // OR if you want to store the full text:
-      // slot: slotMapping[b.slot] || b.slot,
+      slot: b.slot,
       emergency: {
         name: b.emName,
         relation: b.emRelation,
@@ -76,3 +77,60 @@ export async function createVolunteer(req, res) {
   }
 }
 
+export async function getVolunteer(req, res) {
+  try {
+    const volunteer = await VolunteerFlat.findById(req.params.id);
+    if (!volunteer) {
+      return res.status(404).json({ error: 'Volunteer not found' });
+    }
+    res.json(volunteer);
+  } catch (e) {
+    console.error('Error fetching volunteer:', e);
+    res.status(500).json({ error: 'Failed to fetch volunteer' });
+  }
+}
+
+export async function updateVolunteer(req, res) {
+  try {
+    const updated = await VolunteerFlat.findByIdAndUpdate(
+      req.params.id,
+      { $set: req.body },
+      { new: true, runValidators: true }
+    );
+    
+    if (!updated) {
+      return res.status(404).json({ error: 'Volunteer not found' });
+    }
+    
+    res.json(updated);
+  } catch (e) {
+    console.error('Error updating volunteer:', e);
+    
+    if (e.name === 'ValidationError') {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: Object.keys(e.errors).map(key => ({
+          field: key,
+          message: e.errors[key].message
+        }))
+      });
+    }
+    
+    res.status(500).json({ error: 'Failed to update volunteer' });
+  }
+}
+
+export async function removeVolunteer(req, res) {
+  try {
+    const deleted = await VolunteerFlat.findByIdAndDelete(req.params.id);
+    
+    if (!deleted) {
+      return res.status(404).json({ error: 'Volunteer not found' });
+    }
+    
+    res.json({ ok: true, message: 'Volunteer deleted successfully' });
+  } catch (e) {
+    console.error('Error deleting volunteer:', e);
+    res.status(500).json({ error: 'Failed to delete volunteer' });
+  }
+}

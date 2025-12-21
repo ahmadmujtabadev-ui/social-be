@@ -14,6 +14,7 @@ router.use('/api/v1/booth', boothRoutes);
 router.use('/api/v1/participants', participantRoutes);
 router.use('/api/v1/sponsor', sponserRoutes);
 router.use('/api/v1/vendor', vendorRoutes);
-router.use('/api/v1/volunteers', volunteerRoutes);
+router.use('/api/v1/volunteer', volunteerRoutes);
 
 export default router;
+

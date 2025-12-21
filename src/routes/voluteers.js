@@ -1,13 +1,29 @@
-// src/routes/volunteers.js
+// ── src/routes/volunteers.js ──────────────────────────────────────────────
 import express from 'express';
-import {
-  createVolunteer,
-
+import { authRequired } from '../middleware/auth.js';
+import { 
+  listVolunteers, 
+  createVolunteer, 
+  getVolunteer, 
+  updateVolunteer, 
+  removeVolunteer 
 } from '../controllers/volunteers.js';
 
-const router = express.Router();
+const routerV = express.Router();
 
-router.post('/', createVolunteer);
+// GET /api/v1/volunteers - List all volunteers (protected)
+routerV.get('/', listVolunteers);
 
+// GET /api/v1/volunteers/:id - Get single volunteer (protected)
+routerV.get('/:id', getVolunteer);
 
-export default router;  // <-- important
+// POST /api/v1/volunteers - Create new volunteer (public for registration)
+routerV.post('/', createVolunteer);
+
+// PATCH /api/v1/volunteers/:id - Update volunteer (protected)
+routerV.patch('/:id', updateVolunteer);
+
+// DELETE /api/v1/volunteers/:id - Delete volunteer (protected)
+routerV.delete('/:id', removeVolunteer);
+
+export default routerV;

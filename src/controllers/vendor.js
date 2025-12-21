@@ -3,10 +3,10 @@ import { Booth } from "../models/booth.js";
 import { Promo } from "../models/promoCode.js";
 import { Vendor } from "../models/vendor.js";
 import { sendVendorSubmissionEmails } from "../utils/sendEmailNotification.js";
-
-// ── src/controllers/vendors.js ──────────────────────────────────────────────
-
+import { Participant } from '../models/participant.js'
+import { Sponsor } from '../models/sponser.js'
 import cron from 'node-cron';
+const BASE_URL = "https://social-be-roan.vercel.app"
 
 export function setupExpiryCleanupJob() {
   cron.schedule('*/15 * * * *', async () => {
@@ -34,16 +34,6 @@ const numOnly = (v) => {
   return Number.isFinite(n) ? n : undefined;
 };
 
-// // normalize files that may arrive as fieldname, fieldname[], zzor fieldname[0]
-// function groupFiles(files) {
-//   const map = {};
-//   (files || []).forEach(f => {
-//     const key = (f.fieldname || '').replace(/\[\d*\]$/, ''); // strip [0], [], [12]
-//     if (!map[key]) map[key] = [];
-//     map[key].push(f);
-//   });
-//   return map;
-// }
 export async function getStats(req, res) {
   const [total, submitted, approved] = await Promise.all([
     Vendor.countDocuments(),
@@ -53,18 +43,33 @@ export async function getStats(req, res) {
   res.json({ total, submitted, approved });
 }
 
+// Update listVendors to normalize paths
 export async function listVendors(req, res) {
   const { q, status, category, page = '1', limit = '20' } = req.query;
   const filter = {};
   if (status) filter.status = status;
   if (category) filter.category = category;
-  if (q) { filter.$or = [{ vendorName: { $regex: q, $options: 'i' } }, { 'contact.personName': { $regex: q, $options: 'i' } }]; }
+  if (q) { 
+    filter.$or = [
+      { vendorName: { $regex: q, $options: 'i' } }, 
+      { 'contact.personName': { $regex: q, $options: 'i' } }
+    ]; 
+  }
+  
   const skip = (Number(page) - 1) * Number(limit);
   const [items, total] = await Promise.all([
     Vendor.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)),
     Vendor.countDocuments(filter)
   ]);
-  res.json({ items, total, page: Number(page), pages: Math.ceil(total / Number(limit)) });
+  
+  // Normalize all vendor paths before sending
+  const normalizedItems = items.map(normalizeVendor);
+  res.json({ 
+    items: normalizedItems, 
+    total, 
+    page: Number(page), 
+    pages: Math.ceil(total / Number(limit)) 
+  });
 }
 
 function groupFiles(files) {
@@ -83,7 +88,6 @@ function groupFiles(files) {
   }
   return {};
 }
-
 
 async function releaseExpiredHolds(session) {
   const now = new Date();
@@ -132,6 +136,10 @@ export async function createVendor(req, res) {
     const b = req.body || {};
     const filesGrouped = groupFiles(req.files);
 
+    // Debug logging - remove in production
+    console.log('📁 Files grouped:', Object.keys(filesGrouped));
+    console.log('📁 Full filesGrouped:', JSON.stringify(filesGrouped, null, 2));
+
     // Validate required fields
     const missing = [];
     if (!b.personName) missing.push('personName');
@@ -167,36 +175,18 @@ export async function createVendor(req, res) {
 
     await releaseExpiredHolds(session);
 
-    // const booth = await Booth.findOneAndUpdate(
-    //   {
-    //     id: boothNumber,
-    //     category: b.category,
-    //     status: 'available' // Only book if truly available
-    //   },
-    //   {
-    //     $set: {
-    //       status: 'held',
-    //       heldUntil: new Date(Date.now() + 48 * 60 * 60 * 1000) // 48 hours from now
-    //     }
-    //   },
-    //   {
-    //     new: true,
-    //     session // Use transaction
-    //   }
-    // );
-    const HOLD_MS = 48 * 60 * 60 * 1000 // 5000 ms
+    const HOLD_MS = 48 * 60 * 60 * 1000;
 
-    // In createVendor -> Booth.findOneAndUpdate
     const booth = await Booth.findOneAndUpdate(
       {
         id: boothNumber,
         category: b.category,
-        status: 'available' // Only book if truly available
+        status: 'available'  
       },
       {
         $set: {
           status: 'held',
-          heldUntil: new Date(Date.now() + HOLD_MS) // 5 seconds from now
+          heldUntil: new Date(Date.now() + HOLD_MS) 
         }
       },
       {
@@ -241,19 +231,48 @@ export async function createVendor(req, res) {
         promoDiscount = promo.discount;
         promoDiscountType = promo.discountType || 'percent';
         
-        console.log('🎟️ Promo code applied:', promoCode, `-${promoDiscount}${promoDiscountType === 'percent' ? '%' : '$'}`);
       } else {
         await session.abortTransaction();
         return res.status(400).json({ error: "Invalid promo code" });
       }
     }
 
-    // Process file uploads
-    const logoPath = filesGrouped.businessLogo?.[0]?.path;
-    const foodPhotoPaths = (filesGrouped.foodPhotos || []).map(f => f.path);
-    const clothingPhotoPaths = (filesGrouped.clothingPhotos || []).map(f => f.path);
-    const jewelryPhotoPaths = (filesGrouped.jewelryPhotos || []).map(f => f.path);
-    const craftPhotoPaths = (filesGrouped.craftPhotos || []).map(f => f.path);
+    // FIXED: Process file uploads correctly
+    // Handle both 'fieldName' and 'fieldName[]' from form data
+    const logoPath = 
+      filesGrouped.businessLogo?.[0]?.path || 
+      filesGrouped['businessLogo']?.[0]?.path;
+    
+    const foodPhotoPaths = (
+      filesGrouped.foodPhotos || 
+      filesGrouped['foodPhotos[]'] || 
+      []
+    ).map(f => f.path).filter(Boolean);
+    
+    const clothingPhotoPaths = (
+      filesGrouped.clothingPhotos || 
+      filesGrouped['clothingPhotos[]'] || 
+      []
+    ).map(f => f.path).filter(Boolean);
+    
+    const jewelryPhotoPaths = (
+      filesGrouped.jewelryPhotos || 
+      filesGrouped['jewelryPhotos[]'] || 
+      []
+    ).map(f => f.path).filter(Boolean);
+    
+    const craftPhotoPaths = (
+      filesGrouped.craftPhotos || 
+      filesGrouped['craftPhotos[]'] || 
+      []
+    ).map(f => f.path).filter(Boolean);
+
+    // Debug logging - remove in production
+    console.log('🖼️ Logo path:', logoPath);
+    console.log('📸 Food photos:', foodPhotoPaths);
+    console.log('👕 Clothing photos:', clothingPhotoPaths);
+    console.log('💎 Jewelry photos:', jewelryPhotoPaths);
+    console.log('🎨 Craft photos:', craftPhotoPaths);
 
     const baseAmount = numOnly(b.amountToPay) || 0;
     let finalAmount = baseAmount;
@@ -269,11 +288,8 @@ export async function createVendor(req, res) {
     const now = new Date();
     const heldUntil = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
-    // And for vendor bookingTimeline
-    // const now = new Date();
-    // const heldUntil = new Date(now.getTime() + HOLD_MS);
-
     const vendorDoc = {
+      selectedEvent:b.selectedEvent,
       vendorName: b.vendorName,
       contact: {
         personName: b.personName,
@@ -306,7 +322,7 @@ export async function createVendor(req, res) {
       status: 'held'
     };
 
-    // Add category-specific fields
+    // IMPORTANT: Only add category-specific data for the selected category
     if (b.category === 'Food Vendor') {
       vendorDoc.food = {
         items: b.foodItems,
@@ -314,20 +330,17 @@ export async function createVendor(req, res) {
         needPower: String(b.needPowerFood).toLowerCase() === 'yes' || b.needPowerFood === true,
         watts: numOnly(b.foodWatts)
       };
-    }
-    if (b.category === 'Clothing Vendor') {
+    } else if (b.category === 'Clothing Vendor') {
       vendorDoc.clothing = {
         clothingType: b.clothingType,
         photoPaths: clothingPhotoPaths
       };
-    }
-    if (b.category === 'Jewelry Vendor') {
+    } else if (b.category === 'Jewelry Vendor') {
       vendorDoc.jewelry = {
         jewelryType: b.jewelryType,
         photoPaths: jewelryPhotoPaths
       };
-    }
-    if (b.category === 'Craft Booth') {
+    } else if (b.category === 'Craft Booth') {
       vendorDoc.craft = {
         details: b.craftDetails,
         photoPaths: craftPhotoPaths,
@@ -338,17 +351,14 @@ export async function createVendor(req, res) {
 
     const [vendor] = await Vendor.create([vendorDoc], { session });
 
-    // Update booth to reference the vendor
     await Booth.findByIdAndUpdate(
       booth._id,
       { $set: { heldBy: vendor._id } },
       { session }
     );
 
-    // Commit transaction
     await session.commitTransaction();
 
-    // Prepare email data
     const emailData = {
       vendorId: vendor._id,
       vendorName: vendor.vendorName,
@@ -373,7 +383,6 @@ export async function createVendor(req, res) {
       }),
     };
 
-    // Add category-specific data for email
     if (vendor.food) {
       emailData.foodItems = vendor.food.items;
       emailData.needPower = vendor.food.needPower;
@@ -390,19 +399,14 @@ export async function createVendor(req, res) {
       emailData.needPower = vendor.craft.needPower;
       emailData.watts = vendor.craft.watts;
     }
-
-    // Send email notifications (admin + vendor confirmation)
-    console.log('📧 Sending email notifications...');
     
     try {
       await sendVendorSubmissionEmails(emailData);
       console.log('✅ Email notifications sent successfully');
     } catch (emailError) {
       console.error('⚠️ Email notification failed (non-critical):', emailError.message);
-      // Don't fail the request if email fails
     }
 
-    // Return success response
     return res.status(201).json({
       success: true,
       message: "Thank you for applying! We've sent the next steps to your email. Your booth is reserved for the next 48 hours. Please complete the steps in the email to confirm your booking.",
@@ -413,7 +417,14 @@ export async function createVendor(req, res) {
         boothNumber: vendor.boothNumber,
         status: vendor.status,
         heldUntil: heldUntil.toISOString(),
-        pricing: vendor.pricing
+        pricing: vendor.pricing,
+        businessLogoPath: vendor.businessLogoPath,
+        photoPaths: {
+          food: vendor.food?.photoPaths || [],
+          clothing: vendor.clothing?.photoPaths || [],
+          jewelry: vendor.jewelry?.photoPaths || [],
+          craft: vendor.craft?.photoPaths || []
+        }
       }
     });
 
@@ -429,13 +440,200 @@ export async function createVendor(req, res) {
   }
 }
 
-
 export async function getVendor(req, res) {
   const i = await Vendor.find(req.params.id).populate('boothRef');
   if (!i) return res.status(404).json({ error: 'Not found' });
   res.json(i);
 }
 
-export async function updateVendor(req, res) { const u = await Vendor.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true }); if (!u) return res.status(404).json({ error: 'Not found' }); res.json(u); }
+export async function updateVendor(req, res) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const vendorId = req.params.id;
+    const updates = req.body;
+
+    // Find the vendor first
+    const vendor = await Vendor.findById(vendorId).session(session);
+    
+    if (!vendor) {
+      await session.abortTransaction();
+      return res.status(404).json({ error: 'Vendor not found' });
+    }
+
+    // If updating status from held to available, release the booth
+    if (vendor.status === 'held' && updates.status === 'available') {
+      if (vendor.boothRef) {
+        await Booth.findByIdAndUpdate(
+          vendor.boothRef,
+          {
+            $set: {
+              status: 'available',
+              heldUntil: null,
+              heldBy: null
+            }
+          },
+          { session }
+        );
+      }
+    }
+
+    // Update the vendor
+    const updatedVendor = await Vendor.findByIdAndUpdate(
+      vendorId,
+      { $set: updates },
+      { new: true, session }
+    );
+
+    await session.commitTransaction();
+    res.json(updatedVendor);
+
+  } catch (error) {
+    await session.abortTransaction();
+    console.error('Update vendor failed:', error);
+    res.status(500).json({
+      error: 'Failed to update vendor',
+      message: error.message
+    });
+  } finally {
+    session.endSession();
+  }
+}
 export async function removeVendor(req, res) { const d = await Vendor.findByIdAndDelete(req.params.id); if (!d) return res.status(404).json({ error: 'Not found' }); res.json({ ok: true }); }
 
+export async function allstats(req, res){
+  try {
+    const totalVendors = await Vendor.countDocuments();
+    const approvedVendors = await Vendor.countDocuments({ status: 'approved' });
+    const submittedVendors = await Vendor.countDocuments({ status: 'submitted' });
+    const heldVendors = await Vendor.countDocuments({ status: 'held' });
+    const confirmedVendors = await Vendor.countDocuments({ status: 'confirmed' });
+    const expiredVendors = await Vendor.countDocuments({ status: 'expired' });
+    const rejectedVendors = await Vendor.countDocuments({ status: 'rejected' });
+
+    const categoryBreakdown = await Vendor.aggregate([
+      {
+        $group: {
+          _id: '$category',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const totalSponsors = await Sponsor.countDocuments();
+    const sponsorsByTier = await Sponsor.aggregate([
+      {
+        $group: {
+          _id: '$category',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const totalBooths = await Booth.countDocuments();
+    const availableBooths = await Booth.countDocuments({ status: 'available' });
+    const bookedBooths = await Booth.countDocuments({ status: 'booked' });
+    const heldBooths = await Booth.countDocuments({ status: 'held' });
+    const confirmedBooths = await Booth.countDocuments({ status: 'confirmed' });
+
+    const totalParticipants = await Participant.countDocuments();
+    const participantsByCategory = await Participant.aggregate([
+      {
+        $group: {
+          _id: '$category',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const stats = {
+      vendors: {
+        total: totalVendors,
+        approved: approvedVendors,
+        submitted: submittedVendors,
+        held: heldVendors,
+        confirmed: confirmedVendors,
+        expired: expiredVendors,
+        rejected: rejectedVendors,
+        byCategory: categoryBreakdown.reduce((acc, item) => {
+          acc[item._id] = item.count;
+          return acc;
+        }, {})
+      },
+      sponsors: {
+        total: totalSponsors,
+        byTier: sponsorsByTier.reduce((acc, item) => {
+          acc[item._id] = item.count;
+          return acc;
+        }, {})
+      },
+      booths: {
+        total: totalBooths,
+        available: availableBooths,
+        booked: bookedBooths,
+        held: heldBooths,
+        confirmed: confirmedBooths
+      },
+      participants: {
+        total: totalParticipants,
+        byCategory: participantsByCategory.reduce((acc, item) => {
+          acc[item._id] = item.count;
+          return acc;
+        }, {})
+      }
+    };
+
+    res.json({
+      success: true,
+      stats
+    });
+
+  } catch (error) {
+    console.error('Stats fetch error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch statistics',
+      error: error.message
+    });
+  }
+};
+
+function normalizeFilePath(absolutePath) {
+  if (!absolutePath) return null;
+  const filename = absolutePath.split(/[/\\]/).pop();
+  return `${BASE_URL}/uploads/${filename}`;
+}
+
+function normalizeVendor(vendor) {
+  if (!vendor) return vendor;
+  
+  const vendorObj = vendor.toObject ? vendor.toObject() : vendor;
+  
+  // Normalize business logo
+  if (vendorObj.businessLogoPath) {
+    vendorObj.businessLogoPath = normalizeFilePath(vendorObj.businessLogoPath);
+  }
+  
+  // Normalize food photos
+  if (vendorObj.food?.photoPaths?.length) {
+    vendorObj.food.photoPaths = vendorObj.food.photoPaths.map(normalizeFilePath);
+  }
+  
+  // Normalize clothing photos
+  if (vendorObj.clothing?.photoPaths?.length) {
+    vendorObj.clothing.photoPaths = vendorObj.clothing.photoPaths.map(normalizeFilePath);
+  }
+  
+  // Normalize jewelry photos
+  if (vendorObj.jewelry?.photoPaths?.length) {
+    vendorObj.jewelry.photoPaths = vendorObj.jewelry.photoPaths.map(normalizeFilePath);
+  }
+  
+  // Normalize craft photos
+  if (vendorObj.craft?.photoPaths?.length) {
+    vendorObj.craft.photoPaths = vendorObj.craft.photoPaths.map(normalizeFilePath);
+  }
+  
+  return vendorObj;
+}

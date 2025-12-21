@@ -14,33 +14,36 @@ const vendorSchema = new mongoose.Schema(
       isOakville: { type: Boolean, required: true }
     },
     socials: { instagram: String, facebook: String },
-    category: { 
-      type: String, 
-      enum: ['Food Vendor', 'Clothing Vendor', 'Jewelry Vendor', 'Craft Booth', 'Henna Booth'], 
-      required: true 
+    category: {
+      type: String,
+      enum: ['Food Vendor', 'Clothing Vendor', 'Jewelry Vendor', 'Craft Booth', 'Henna Booth'],
+      required: true
     },
     businessLogoPath: String,
-   
+
     food: { items: String, photoPaths: [String], needPower: Boolean, watts: Number },
     clothing: { clothingType: String, photoPaths: [String] },
     jewelry: { jewelryType: String, photoPaths: [String] },
     craft: { details: String, photoPaths: [String], needPower: Boolean, watts: Number },
-    
+
     boothNumber: String,
     boothRef: { type: mongoose.Schema.Types.ObjectId, ref: 'Booth' },
-    
-    pricing: { 
-      base: Number, 
-      promoCode: String, 
+
+    pricing: {
+      base: Number,
+      promoCode: String,
       promoDiscount: Number,
-      promoDiscountType: { 
-        type: String, 
+      promoDiscountType: {
+        type: String,
         enum: ['percent', 'flat'],
         default: 'percent'
       },
-      final: Number 
+      final: Number
     },
-    
+
+    selectedEvent: {
+      type: String
+    },
     // NEW: Track booking timeline
     bookingTimeline: {
       submittedAt: Date,
@@ -48,15 +51,15 @@ const vendorSchema = new mongoose.Schema(
       confirmedAt: Date,
       paidAt: Date
     },
-    
+
     notes: String,
     termsAcceptedAt: Date,
-    status: { 
-      type: String, 
-      enum: ['submitted', 'held', 'confirmed', 'under_review', 'approved', 'rejected', 'paid', 'cancelled', 'expired'], 
-      default: 'submitted' 
+    status: {
+      type: String,
+      enum: ['submitted', 'held', 'confirmed', 'under_review', 'approved', 'rejected', 'paid', 'cancelled', 'expired'],
+      default: 'submitted'
     }
-  }, 
+  },
   { timestamps: true }
 );
 
