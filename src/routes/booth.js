@@ -7,6 +7,6 @@ const routerB = express.Router();
 routerB.get('/', listBooths);
 routerB.get('/:id', authRequired, getBooth);
 routerB.post('/', createMultipleBooths);
-routerB.patch('/:id', authRequired, updateBooth);
+routerB.put('/:id', updateBooth);
 routerB.delete('/:id', authRequired, removeBooth);
 export default routerB;

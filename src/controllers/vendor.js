@@ -136,10 +136,6 @@ export async function createVendor(req, res) {
     const b = req.body || {};
     const filesGrouped = groupFiles(req.files);
 
-    // Debug logging - remove in production
-    console.log('📁 Files grouped:', Object.keys(filesGrouped));
-    console.log('📁 Full filesGrouped:', JSON.stringify(filesGrouped, null, 2));
-
     // Validate required fields
     const missing = [];
     if (!b.personName) missing.push('personName');
@@ -194,6 +190,7 @@ export async function createVendor(req, res) {
         session
       }
     );
+    console.log("193 data",booth)
 
     if (!booth) {
       await session.abortTransaction();
