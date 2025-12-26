@@ -201,6 +201,7 @@ export async function createVendor(req, res) {
 
     let promoCode, promoDiscount, promoDiscountType;
     const incomingPromo = (b.promoCode || '').toString().trim();
+    console.log("incomming promo", incomingPromo)
     
     if (incomingPromo) {
       const promo = await Promo.findOne({
