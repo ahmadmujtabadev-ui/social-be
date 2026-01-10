@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { Promo } from "../models/promoCode.js";
+import { Promo } from "../models/promo.js";
 import { Vendor } from "../models/vendor.js";
 import { sendVendorSubmissionEmails } from "../utils/sendEmailNotification.js";
 import { Participant } from "../models/participant.js";
