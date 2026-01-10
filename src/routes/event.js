@@ -12,12 +12,12 @@ import {
 const router = express.Router();
 
 // Public routes
-router.get('/', listEvents);
+router.get('/get', listEvents);
 router.get('/:id', getEvent);
 
 // Protected routes
-router.post('/', authRequired, createEvent);
-router.put('/:id', authRequired, updateEvent);
-router.delete('/:id', authRequired, removeEvent);
+router.post('/' , createEvent);
+router.put('/:id', updateEvent);
+router.delete('/:id', removeEvent);
 
 export default router;
