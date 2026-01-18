@@ -1,25 +1,56 @@
-// ── src/controllers/volunteers.js ─────────────────────────────────────────
+// src/controllers/volunteers.js
 import { VolunteerFlat } from '../models/volunteer.js';
 
-export async function listVolunteers(_req, res) {
+// List volunteers with event filtering
+export async function listVolunteers(req, res) {
   try {
-    const volunteers = await VolunteerFlat.find().sort({ createdAt: -1 });
-    res.json(volunteers);
+    const { eventId, page = 1, limit = 20 } = req.query;
+    const filter = {};
+    
+    // Apply event filter if provided
+    if (eventId) {
+      filter.selectedEvent = eventId;
+    }
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const [volunteers, total] = await Promise.all([
+      VolunteerFlat.find(filter)
+        .populate('selectedEvent', 'title eventDateTime location')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      VolunteerFlat.countDocuments(filter)
+    ]);
+    console.log("voluters",volunteers)
+    
+    res.json({
+      success: true,
+      data: volunteers,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
   } catch (e) {
     console.error('Error listing volunteers:', e);
     res.status(500).json({ error: 'Failed to fetch volunteers' });
   }
 }
 
+// Create volunteer
 export async function createVolunteer(req, res) {
   try {
     const b = req.body;
 
-    // Validate required fields
-    if (!b.fullName || !b.email || !b.phone || !b.slot || !b.emName || !b.emRelation || !b.emPhone) {
+    // Validate required fields including selectedEvent
+    if (!b.selectedEvent || !b.fullName || !b.email || !b.phone || !b.slot || !b.emName || !b.emRelation || !b.emPhone) {
       return res.status(400).json({ 
         error: 'Missing required fields',
         missing: {
+          selectedEvent: !b.selectedEvent,
           fullName: !b.fullName,
           email: !b.email,
           phone: !b.phone,
@@ -33,6 +64,7 @@ export async function createVolunteer(req, res) {
 
     // Create volunteer with emergency contact as nested object
     const created = await VolunteerFlat.create({
+      selectedEvent: b.selectedEvent,
       fullName: b.fullName,
       email: b.email,
       phone: b.phone,
@@ -45,8 +77,12 @@ export async function createVolunteer(req, res) {
       termsAcceptedAt: b.terms ? new Date() : undefined
     });
 
+    // Populate event details
+    await created.populate('selectedEvent', 'title eventDateTime location');
+
     res.status(201).json({
       success: true,
+      message: 'Volunteer registration successful!',
       data: created
     });
   } catch (e) {
@@ -63,10 +99,10 @@ export async function createVolunteer(req, res) {
       });
     }
     
-    // Handle duplicate key errors (e.g., email already exists)
+    // Handle duplicate key errors (email already exists for this event)
     if (e.code === 11000) {
       return res.status(409).json({
-        error: 'A volunteer with this email already exists'
+        error: 'You have already registered as a volunteer for this event'
       });
     }
     
@@ -77,9 +113,12 @@ export async function createVolunteer(req, res) {
   }
 }
 
+// Get single volunteer
 export async function getVolunteer(req, res) {
   try {
-    const volunteer = await VolunteerFlat.findById(req.params.id);
+    const volunteer = await VolunteerFlat.findById(req.params.id)
+      .populate('selectedEvent', 'title eventDateTime location');
+      
     if (!volunteer) {
       return res.status(404).json({ error: 'Volunteer not found' });
     }
@@ -90,13 +129,14 @@ export async function getVolunteer(req, res) {
   }
 }
 
+// Update volunteer
 export async function updateVolunteer(req, res) {
   try {
     const updated = await VolunteerFlat.findByIdAndUpdate(
       req.params.id,
       { $set: req.body },
       { new: true, runValidators: true }
-    );
+    ).populate('selectedEvent', 'title eventDateTime location');
     
     if (!updated) {
       return res.status(404).json({ error: 'Volunteer not found' });
@@ -120,6 +160,7 @@ export async function updateVolunteer(req, res) {
   }
 }
 
+// Delete volunteer
 export async function removeVolunteer(req, res) {
   try {
     const deleted = await VolunteerFlat.findByIdAndDelete(req.params.id);

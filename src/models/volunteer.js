@@ -1,102 +1,73 @@
+// src/models/volunteer.js
 import mongoose from 'mongoose';
 
-const emergencyContactSchema = new mongoose.Schema({
-  name: {
-    type: String,
-  },
-  relation: {
-    type: String,
-  },
-  phone: {
-    type: String,
-  }
-}, { _id: false }); // _id: false prevents creating separate IDs for subdocuments
-
 const volunteerSchema = new mongoose.Schema({
+  // NEW: Event reference (required)
+  selectedEvent: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Event',
+    required: [true, 'Event selection is required'],
+    index: true
+  },
+  
   fullName: {
     type: String,
     required: [true, 'Full name is required'],
     trim: true
   },
+  
   email: {
     type: String,
     required: [true, 'Email is required'],
-    unique: true,
+    trim: true,
     lowercase: true,
+    match: [/\S+@\S+\.\S+/, 'Please enter a valid email']
   },
+  
   phone: {
     type: String,
     required: [true, 'Phone number is required'],
     trim: true
   },
+  
   slot: {
     type: String,
     required: [true, 'Volunteer slot is required'],
-    enum: {
-      values: ['morning', 'afternoon', 'evening', 'fullday'],
-      message: '{VALUE} is not a valid slot option'
+    enum: [
+      'Afternoon Shift (2pm - 6pm)',
+      'Evening Shift (5pm - 9pm)',
+      'Night Shift (7pm - 11pm)',
+      'Full Day (4pm - 11pm)'
+    ]
+  },
+  
+  emergency: {
+    name: {
+      type: String,
+      required: [true, 'Emergency contact name is required'],
+      trim: true
+    },
+    relation: {
+      type: String,
+      required: [true, 'Emergency contact relation is required'],
+      trim: true
+    },
+    phone: {
+      type: String,
+      required: [true, 'Emergency contact phone is required'],
+      trim: true
     }
   },
-  emergency: {
-    type: emergencyContactSchema,
-  },
+  
   termsAcceptedAt: {
-    type: Date
-  },
-  status: {
-    type: String,
-    enum: ['pending', 'confirmed', 'cancelled'],
-    default: 'pending'
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true
 });
 
-// Create index on email for faster lookups
-volunteerSchema.index({ email: 1 });
+// Compound index to prevent duplicate email per event
+volunteerSchema.index({ email: 1, selectedEvent: 1 }, { unique: true });
 
-const Volunteer = mongoose.model('Volunteer', volunteerSchema);
-
-export default Volunteer;
-
-// Alternative flat schema (if nested objects cause issues):
-const volunteerSchemaFlat = new mongoose.Schema({
-  fullName: {
-    type: String,
-    trim: true
-  },
-  email: {
-    type: String,
-    unique: true,
-    lowercase: true,
-    trim: true
-  },
-  phone: {
-    type: String,
-    trim: true
-  },
-  slot: {
-    type: String,
-  },
-  emergencyName: {
-    type: String,
-  },
-  emergencyRelation: {
-    type: String,
-  },
-  emergencyPhone: {
-    type: String,
-  },
-  termsAcceptedAt: {
-    type: Date
-  },
-  status: {
-    type: String,
-    enum: ['pending', 'confirmed', 'cancelled'],
-    default: 'pending'
-  }
-}, {
-  timestamps: true
-});
-
-export const VolunteerFlat = mongoose.model('VolunteerFlat', volunteerSchemaFlat);
+export const VolunteerFlat = mongoose.models.VolunteerFlat || mongoose.model('VolunteerFlat', volunteerSchema);

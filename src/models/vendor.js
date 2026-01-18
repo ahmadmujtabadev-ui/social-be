@@ -1,78 +1,75 @@
-// vendor.model.js
-import mongoose from "mongoose";
+// src/models/vendor.js
+import mongoose from 'mongoose';
 
-const vendorSchema = new mongoose.Schema(
-  {
-    vendorName: { type: String, required: true },
-    contact: {
-      personName: { type: String, required: true },
-      email: { type: String, required: true },
-      phone: { type: String, required: true },
-      isOakville: { type: Boolean, required: true },
-    },
-    socials: { instagram: String, facebook: String },
-
-    category: {
-      type: String,
-      enum: ["Food Vendor", "Clothing Vendor", "Jewelry Vendor", "Craft Booth", "Henna Booth"],
-      required: true,
-    },
-
-    businessLogoPath: String,
-
-    food: { items: String, photoPaths: [String], needPower: Boolean, watts: Number },
-    clothing: { clothingType: String, photoPaths: [String] },
-    jewelry: { jewelryType: String, photoPaths: [String] },
-    craft: { details: String, photoPaths: [String], needPower: Boolean, watts: Number },
-
-    // keep boothNumber same type for FE compatibility
-    boothNumber: { type: String, required: true },
-
-    // NEW (derived from catalog)
-    boothCategory: { type: String },
-    boothPrice: { type: Number, required: true },
-
-    pricing: {
-      base: Number,
-      promoCode: String,
-      promoDiscount: Number,
-      promoDiscountType: { type: String, enum: ["percent", "flat"], default: "percent" },
-      final: Number,
-    },
-
-    selectedEvent: { type: String, required: true },
-
-    bookingTimeline: {
-      submittedAt: Date,
-      heldUntil: Date,
-      confirmedAt: Date,
-      paidAt: Date,
-    },
-
-    notes: String,
-    termsAcceptedAt: Date,
-
-    status: {
-      type: String,
-      enum: ["submitted", "held", "confirmed", "under_review", "approved", "rejected", "paid", "cancelled", "expired"],
-      default: "submitted",
-    },
+const vendorSchema = new mongoose.Schema({
+  // Event reference (required)
+  selectedEvent: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Event',
+    required: [true, 'Event selection is required'],
+    index: true
   },
-  { timestamps: true }
-);
-
-// Only one ACTIVE vendor per booth per event
-vendorSchema.index(
-  { selectedEvent: 1, boothNumber: 1 },
-  {
-    unique: true,
-    partialFilterExpression: {
-      status: { $in: ["held", "confirmed", "under_review", "approved", "paid"] },
+  
+  vendorName: {
+    type: String,
+    required: [true, 'Vendor name is required'],
+    trim: true
+  },
+  
+  category: {
+    type: String,
+    required: [true, 'Category is required'],
+    trim: true
+  },
+  
+  boothNumber: {
+    type: String,
+    required: [true, 'Booth number is required'],
+    trim: true
+  },
+  
+  contact: {
+    personName: {
+      type: String,
+      required: [true, 'Contact person name is required'],
+      trim: true
     },
+    email: {
+      type: String,
+      required: [true, 'Contact email is required'],
+      trim: true,
+      lowercase: true
+    },
+    phone: {
+      type: String,
+      required: [true, 'Contact phone is required'],
+      trim: true
+    }
+  },
+  
+  description: {
+    type: String,
+    trim: true
+  },
+  
+  status: {
+    type: String,
+    enum: ['booked', 'confirmed', 'held'], // ONLY booked and confirmed allowed
+    default: 'booked'
+  },
+  
+  termsAcceptedAt: {
+    type: Date,
+    default: null
   }
-);
+}, {
+  timestamps: true
+});
 
-// For expiry scans
-vendorSchema.index({ status: 1, "bookingTimeline.heldUntil": 1 });
+// Compound unique index: booth number must be unique per event
+vendorSchema.index({ boothNumber: 1, selectedEvent: 1 }, { unique: true });
 
-export const Vendor = mongoose.model("Vendor", vendorSchema);
+// Index for filtering
+vendorSchema.index({ status: 1, selectedEvent: 1 });
+
+export const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', vendorSchema)

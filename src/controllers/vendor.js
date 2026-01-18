@@ -45,32 +45,54 @@ export async function getStats(req, res) {
 }
 
 export async function listVendors(req, res) {
-  const { q, status, category, page = "1", limit = "20" } = req.query;
-  const filter = {};
-  if (status) filter.status = status;
-  if (category) filter.category = category;
-  if (q) {
-    filter.$or = [
-      { vendorName: { $regex: q, $options: "i" } },
-      { "contact.personName": { $regex: q, $options: "i" } },
-    ];
+  try {
+    const { eventId, status, page = 1, limit = 20, q } = req.query;
+    const filter = {};
+
+    // FILTER BY EVENT - This is the key change!
+    if (eventId) {
+      filter.selectedEvent = eventId;
+    }
+
+    // Filter by status
+    if (status) {
+      filter.status = status.toLowerCase();
+    }
+
+    // Search filter
+    if (q) {
+      filter.$or = [
+        { vendorName: { $regex: q, $options: 'i' } },
+        { 'contact.email': { $regex: q, $options: 'i' } },
+        { 'contact.personName': { $regex: q, $options: 'i' } }
+      ];
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [vendors, total] = await Promise.all([
+      Vendor.find(filter)
+        .populate('selectedEvent', 'title eventDateTime location badge status isActive')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Vendor.countDocuments(filter)
+    ]);
+
+    res.json({
+      success: true,
+      data: vendors,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (e) {
+    console.error('Error listing vendors:', e);
+    res.status(500).json({ error: 'Failed to fetch vendors' });
   }
-
-  const skip = (Number(page) - 1) * Number(limit);
-
-  const [items, total] = await Promise.all([
-    Vendor.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)),
-    Vendor.countDocuments(filter),
-  ]);
-
-  const normalizedItems = items.map(normalizeVendor);
-
-  res.json({
-    items: normalizedItems,
-    total,
-    page: Number(page),
-    pages: Math.ceil(total / Number(limit)),
-  });
 }
 
 function groupFiles(files) {
@@ -90,8 +112,6 @@ function groupFiles(files) {
   return {};
 }
 
-// Vendor-only expiry: if heldUntil passed, mark vendor expired.
-// That automatically "frees" the booth because the unique index no longer applies.
 async function releaseExpiredHolds(session) {
   const now = new Date();
   await Vendor.updateMany(
@@ -403,7 +423,7 @@ export async function createVendor(req, res) {
 }
 
 export async function getVendor(req, res) {
-  const i = await Vendor.findById(req.params.id); // fixed
+  const i = await Vendor.findById(req.params.id);
   if (!i) return res.status(404).json({ error: "Not found" });
   res.json(normalizeVendor(i));
 }
